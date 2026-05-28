@@ -16,7 +16,7 @@ type Step = 'input' | 'loading' | 'reveal' | 'breakdown'
 
 const page = {
   initial: { opacity: 0, y: 10 },
-  animate: { opacity: 1, y: 0, transition: { duration: 0.3, ease: 'easeOut' } },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.3 } },
   exit:    { opacity: 0, y: -8, transition: { duration: 0.2 } },
 }
 
@@ -27,7 +27,7 @@ const sectionList = {
 
 const sectionCard = {
   hidden: { opacity: 0, x: -12 },
-  show:   { opacity: 1, x: 0, transition: { duration: 0.35, ease: 'easeOut' } },
+  show:   { opacity: 1, x: 0, transition: { duration: 0.35 } },
 }
 
 export default function CheckFlow() {
