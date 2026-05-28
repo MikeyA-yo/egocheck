@@ -40,7 +40,7 @@ export const MOCK_RESULTS: EgoCheckResult[] = [
     score: 87,
     tier: 'Untouchable',
     tierEmoji: '🏆',
-    roastHeadline: 'Annoyingly well-crafted. You probably already have offers.',
+    roastHeadline: 'Insufferably well done. We had to look twice to find something to criticise.',
     sections: [
       {
         name: 'Headline / Summary',
@@ -103,7 +103,7 @@ export const MOCK_RESULTS: EgoCheckResult[] = [
     score: 63,
     tier: 'Solid. Room to grow.',
     tierEmoji: '✅',
-    roastHeadline: 'Above average, which is not the bar you should be aiming for.',
+    roastHeadline: 'You have potential. Your resume is hiding it.',
     sections: [
       {
         name: 'Headline / Summary',
@@ -166,7 +166,7 @@ export const MOCK_RESULTS: EgoCheckResult[] = [
     score: 54,
     tier: "It's giving effort.",
     tierEmoji: '⚠️',
-    roastHeadline: "You put in the work. The resume just doesn't show it yet.",
+    roastHeadline: "This resume says 'I watched tutorials' more than 'I built things.'",
     sections: [
       {
         name: 'Headline / Summary',
@@ -229,7 +229,7 @@ export const MOCK_RESULTS: EgoCheckResult[] = [
     score: 22,
     tier: 'Certified Delusion',
     tierEmoji: '🔥',
-    roastHeadline: 'This resume is trying to be many things and succeeding at none of them.',
+    roastHeadline: 'Recruiters are surviving this resume out of politeness.',
     sections: [
       {
         name: 'Headline / Summary',
@@ -292,7 +292,7 @@ export const MOCK_RESULTS: EgoCheckResult[] = [
     score: 11,
     tier: 'Start Over.',
     tierEmoji: '💀',
-    roastHeadline: 'Not a resume. A list of activities formatted as a resume.',
+    roastHeadline: 'Delete this. Start with a blank document. That is already better.',
     sections: [
       {
         name: 'Headline / Summary',
@@ -399,6 +399,33 @@ export function generatePseudonym(): string {
   const num = String(Math.floor(Math.random() * 100)).padStart(2, '0')
   return `${adj}${noun}_${num}`
 }
+
+export interface ActivityItem {
+  id: number
+  text: string
+  timeAgo: string
+}
+
+export const ACTIVITIES: ActivityItem[] = [
+  { id: 1,  text: 'BackendMercenary_77 just got humbled: 82 → 61.',                              timeAgo: 'just now'  },
+  { id: 2,  text: 'A product manager from Lagos survived with 73. Barely.',                       timeAgo: '1 min ago' },
+  { id: 3,  text: 'Recruiter flagged 14 buzzwords in a single submission.',                       timeAgo: '2 min ago' },
+  { id: 4,  text: 'SilentNomad_03 published their 22 to the Wall of Shame. Boldly.',             timeAgo: '3 min ago' },
+  { id: 5,  text: 'A recent bootcamp grad scored 38. The skills section did the damage.',         timeAgo: '5 min ago' },
+  { id: 6,  text: 'NullPointerHero_77 sits untouchable at 91. As usual.',                        timeAgo: '7 min ago' },
+  { id: 7,  text: "Someone listed 'Microsoft Word' as a technical skill. They scored 9.",         timeAgo: '9 min ago' },
+  { id: 8,  text: 'A senior dev retried after a 45. New score: 67. Growth.',                     timeAgo: '11 min ago' },
+  { id: 9,  text: '3 resumes submitted this hour. Average score: 41.',                            timeAgo: '14 min ago' },
+  { id: 10, text: 'CaffeineEngineer_67 joins the Hall of Fame at 79.',                           timeAgo: '16 min ago' },
+  { id: 11, text: '"Passionate, results-driven team player" appeared 4 times in one resume.',     timeAgo: '19 min ago' },
+  { id: 12, text: 'A portfolio with no live links scored 19. Predictably.',                       timeAgo: '21 min ago' },
+  { id: 13, text: 'RecursiveSage_14 hit 88. We had nothing left to say.',                        timeAgo: '24 min ago' },
+  { id: 14, text: 'FrontendGuru_21 filed for the Wall of Shame at 13. Brave.',                   timeAgo: '26 min ago' },
+  { id: 15, text: 'A 10-year vet scored 34. One year of experience, repeated ten times.',         timeAgo: '29 min ago' },
+  { id: 16, text: '"Team player" was listed under Skills. We are so tired.',                      timeAgo: '32 min ago' },
+  { id: 17, text: 'Two LinkedIn bios submitted back-to-back: 71 and 22. Same person. Two days.', timeAgo: '35 min ago' },
+  { id: 18, text: 'AsyncDrifter_09 submitted a portfolio that actually made sense. 85.',          timeAgo: '38 min ago' },
+]
 
 export const LOADING_MESSAGES = [
   'Detecting buzzword density...',
