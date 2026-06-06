@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { motion, AnimatePresence, animate } from 'motion/react'
 import {
@@ -13,11 +13,23 @@ import {
 import PseudonymModal from './PseudonymModal'
 
 type Step = 'input' | 'loading' | 'reveal' | 'breakdown'
+type InputMethod = 'text' | 'pdf' | 'url'
+
+type CheckPayload =
+  | { method: 'text'; text: string; inputType: InputType }
+  | { method: 'pdf'; pdfBase64: string; inputType: InputType }
+  | { method: 'url'; url: string; inputType: InputType }
 
 const page = {
   initial: { opacity: 0, y: 10 },
   animate: { opacity: 1, y: 0, transition: { duration: 0.3 } },
   exit:    { opacity: 0, y: -8, transition: { duration: 0.2 } },
+}
+
+const methodSlide = {
+  initial: { opacity: 0, y: 6 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.22 } },
+  exit:    { opacity: 0, y: -4, transition: { duration: 0.15 } },
 }
 
 const sectionList = {
@@ -32,22 +44,73 @@ const sectionCard = {
 
 export default function CheckFlow() {
   const [step, setStep] = useState<Step>('input')
-  const [inputText, setInputText] = useState('')
-  const [inputType, setInputType] = useState<InputType>('resume')
-  const [charError, setCharError] = useState(false)
-  const [result, setResult] = useState<EgoCheckResult | null>(null)
+
+  // Input state
+  const [inputType, setInputType]   = useState<InputType>('resume')
+  const [inputMethod, setInputMethod] = useState<InputMethod>('text')
+  const [inputText, setInputText]   = useState('')
+  const [pdfFile, setPdfFile]       = useState<File | null>(null)
+  const [urlInput, setUrlInput]     = useState('')
+
+  // Error/validation state
+  const [charError, setCharError]   = useState(false)
+  const [pdfError, setPdfError]     = useState('')
+  const [urlError, setUrlError]     = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Result state
+  const [result, setResult]         = useState<EgoCheckResult | null>(null)
   const [displayScore, setDisplayScore] = useState(0)
   const [scoreLanded, setScoreLanded] = useState(false)
   const [loadingMsgIdx, setLoadingMsgIdx] = useState(0)
-  const [showModal, setShowModal] = useState(false)
+  const [showModal, setShowModal]   = useState(false)
 
-  const charCount = inputText.length
+  // Holds the payload from handleSubmit so the loading effect can read it
+  const pendingPayload = useRef<CheckPayload | null>(null)
+
+  const charCount  = inputText.length
   const isUnderMin = charCount < 100
-  const isOverMax = charCount > 5000
+  const isOverMax  = charCount > 5000
 
-  const handleSubmit = () => {
-    if (isUnderMin) { setCharError(true); return }
+  const clearErrors = () => {
     setCharError(false)
+    setPdfError('')
+    setUrlError('')
+  }
+
+  const handleSubmit = async () => {
+    if (inputMethod === 'text') {
+      if (isUnderMin) { setCharError(true); return }
+      if (isOverMax) return
+      pendingPayload.current = { method: 'text', text: inputText, inputType }
+
+    } else if (inputMethod === 'pdf') {
+      if (!pdfFile) { setPdfError('Select a PDF file first.'); return }
+      setIsSubmitting(true)
+      try {
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve((reader.result as string).split(',')[1])
+          reader.onerror = reject
+          reader.readAsDataURL(pdfFile)
+        })
+        pendingPayload.current = { method: 'pdf', pdfBase64: base64, inputType }
+      } catch {
+        setPdfError('Could not read the file. Try again.')
+        setIsSubmitting(false)
+        return
+      }
+      setIsSubmitting(false)
+
+    } else {
+      if (!urlInput.match(/^https?:\/\/.+/)) {
+        setUrlError('Enter a valid URL starting with https://')
+        return
+      }
+      pendingPayload.current = { method: 'url', url: urlInput, inputType }
+    }
+
+    clearErrors()
     setLoadingMsgIdx(0)
     setStep('loading')
   }
@@ -55,33 +118,39 @@ export default function CheckFlow() {
   const handleStartOver = () => {
     setStep('input')
     setInputText('')
+    setPdfFile(null)
+    setUrlInput('')
+    setInputMethod('text')
+    clearErrors()
     setResult(null)
     setShowModal(false)
   }
 
-  // Loading: call Gemini API + enforce minimum 4s for progress bar animation
+  // Loading: call API + enforce 4s minimum for progress bar animation
   useEffect(() => {
     if (step !== 'loading') return
+    const payload = pendingPayload.current
+    if (!payload) return
+
     const msgInterval = setInterval(() => setLoadingMsgIdx((i) => i + 1), 750)
-    const controller = new AbortController()
+    const controller  = new AbortController()
 
     const minDelay = new Promise<void>((r) => setTimeout(r, 4000))
-    const apiCall = fetch('/api/check', {
+    const apiCall  = fetch('/api/check', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: inputText, inputType }),
+      body: JSON.stringify(payload),
       signal: controller.signal,
     }).then((r) => r.json())
 
     Promise.all([minDelay, apiCall])
       .then(([, data]) => {
         clearInterval(msgInterval)
-        if (data?.score !== undefined) {
-          setResult(data as EgoCheckResult)
-        } else {
-          // API error — fall back to mock so the UI still works
-          setResult(MOCK_RESULTS[Math.floor(Math.random() * MOCK_RESULTS.length)])
-        }
+        setResult(
+          (data as EgoCheckResult)?.score !== undefined
+            ? (data as EgoCheckResult)
+            : MOCK_RESULTS[Math.floor(Math.random() * MOCK_RESULTS.length)]
+        )
         setDisplayScore(0)
         setScoreLanded(false)
         setStep('reveal')
@@ -96,8 +165,7 @@ export default function CheckFlow() {
       })
 
     return () => { clearInterval(msgInterval); controller.abort() }
-  // inputText and inputType are stable once step transitions to 'loading'
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step])
 
   // Score counter via motion animate()
@@ -134,10 +202,11 @@ export default function CheckFlow() {
               <div className="mb-8">
                 <h1 className="text-2xl font-semibold text-foreground mb-2">Drop it. We&apos;ll be honest.</h1>
                 <p className="text-muted text-sm">
-                  Paste your resume, LinkedIn bio, or portfolio description. We&apos;ll tell you exactly where you stand.
+                  Paste your text, upload a PDF, or drop a URL. We&apos;ll tell you exactly where you stand.
                 </p>
               </div>
 
+              {/* What type are you submitting */}
               <div className="mb-4">
                 <div className="flex gap-2">
                   {(['resume', 'linkedin', 'portfolio'] as InputType[]).map((type) => (
@@ -156,54 +225,179 @@ export default function CheckFlow() {
                 </div>
               </div>
 
-              <textarea
-                value={inputText}
-                onChange={(e) => {
-                  setInputText(e.target.value)
-                  if (charError && e.target.value.length >= 100) setCharError(false)
-                }}
-                maxLength={5000}
-                placeholder={
-                  inputType === 'resume'
-                    ? 'Paste your resume text here. Work experience, summary, skills — all of it.'
-                    : inputType === 'linkedin'
-                    ? 'Paste your LinkedIn About section or full profile summary here.'
-                    : 'Paste your portfolio description, bio, or project showcase text here.'
-                }
-                className={`w-full h-56 bg-surface border rounded-lg p-4 text-sm text-foreground placeholder:text-muted resize-none focus:outline-none transition-colors leading-relaxed ${
-                  charError
-                    ? 'border-red-500/50 focus:border-red-500'
-                    : isOverMax
-                    ? 'border-amber-500/50'
-                    : 'border-border focus:border-foreground/20'
-                }`}
-              />
-
-              <div className="flex items-center justify-between mt-2">
-                <div className="h-4">
-                  <AnimatePresence>
-                    {charError && (
-                      <motion.p
-                        initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                        className="text-red-400 text-xs"
-                      >
-                        Give us something to work with.
-                      </motion.p>
-                    )}
-                  </AnimatePresence>
-                </div>
-                <span className={`text-xs font-mono transition-colors ${isOverMax ? 'text-amber-400' : 'text-muted'}`}>
-                  {charCount} / 5000
-                </span>
+              {/* How are you submitting it */}
+              <div className="flex gap-2 mb-5">
+                {(['text', 'pdf', 'url'] as InputMethod[]).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => { setInputMethod(m); clearErrors() }}
+                    className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                      inputMethod === m
+                        ? 'bg-foreground/10 text-foreground border border-foreground/20'
+                        : 'border border-border text-muted hover:text-foreground hover:border-foreground/20'
+                    }`}
+                  >
+                    {m === 'text' ? 'Paste Text' : m === 'pdf' ? 'Upload PDF' : 'Enter URL'}
+                  </button>
+                ))}
               </div>
+
+              {/* Input content area — animated on method switch */}
+              <AnimatePresence mode="wait">
+
+                {inputMethod === 'text' && (
+                  <motion.div key="text" variants={methodSlide} initial="initial" animate="animate" exit="exit">
+                    <textarea
+                      value={inputText}
+                      onChange={(e) => {
+                        setInputText(e.target.value)
+                        if (charError && e.target.value.length >= 100) setCharError(false)
+                      }}
+                      maxLength={5000}
+                      placeholder={
+                        inputType === 'resume'
+                          ? 'Paste your resume text here. Work experience, summary, skills — all of it.'
+                          : inputType === 'linkedin'
+                          ? 'Paste your LinkedIn About section or full profile summary here.'
+                          : 'Paste your portfolio description, bio, or project showcase text here.'
+                      }
+                      className={`w-full h-56 bg-surface border rounded-lg p-4 text-sm text-foreground placeholder:text-muted resize-none focus:outline-none transition-colors leading-relaxed ${
+                        charError
+                          ? 'border-red-500/50 focus:border-red-500'
+                          : isOverMax
+                          ? 'border-amber-500/50'
+                          : 'border-border focus:border-foreground/20'
+                      }`}
+                    />
+                    <div className="flex items-center justify-between mt-2">
+                      <div className="h-4">
+                        <AnimatePresence>
+                          {charError && (
+                            <motion.p
+                              initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                              className="text-red-400 text-xs"
+                            >
+                              Give us something to work with. (100 chars min)
+                            </motion.p>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                      <span className={`text-xs font-mono transition-colors ${isOverMax ? 'text-amber-400' : 'text-muted'}`}>
+                        {charCount} / 5000
+                      </span>
+                    </div>
+                  </motion.div>
+                )}
+
+                {inputMethod === 'pdf' && (
+                  <motion.div key="pdf" variants={methodSlide} initial="initial" animate="animate" exit="exit">
+                    <label
+                      className={`flex flex-col items-center justify-center w-full h-44 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
+                        pdfFile
+                          ? 'border-accent/40 bg-accent/5'
+                          : pdfError
+                          ? 'border-red-500/40 bg-red-500/5'
+                          : 'border-border hover:border-foreground/30 bg-surface'
+                      }`}
+                    >
+                      <input
+                        type="file"
+                        accept=".pdf,application/pdf"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (!file) return
+                          if (file.type !== 'application/pdf' && !file.name.endsWith('.pdf')) {
+                            setPdfError('File must be a PDF.')
+                            return
+                          }
+                          if (file.size > 4 * 1024 * 1024) {
+                            setPdfError('PDF must be under 4 MB.')
+                            return
+                          }
+                          setPdfError('')
+                          setPdfFile(file)
+                        }}
+                      />
+                      {pdfFile ? (
+                        <div className="text-center px-4">
+                          <p className="text-sm text-foreground font-medium truncate max-w-xs">{pdfFile.name}</p>
+                          <p className="text-xs text-muted mt-1">{(pdfFile.size / 1024).toFixed(0)} KB · PDF ready</p>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.preventDefault(); setPdfFile(null) }}
+                            className="text-xs text-muted/50 hover:text-red-400 mt-3 transition-colors"
+                          >
+                            Remove file
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="text-center px-4">
+                          <p className="text-sm text-muted">Drop your CV here or <span className="text-foreground">click to browse</span></p>
+                          <p className="text-xs text-muted/50 mt-1.5">PDF only · Max 4 MB</p>
+                        </div>
+                      )}
+                    </label>
+                    <div className="h-5 mt-2">
+                      <AnimatePresence>
+                        {pdfError && (
+                          <motion.p
+                            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                            className="text-red-400 text-xs"
+                          >
+                            {pdfError}
+                          </motion.p>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </motion.div>
+                )}
+
+                {inputMethod === 'url' && (
+                  <motion.div key="url" variants={methodSlide} initial="initial" animate="animate" exit="exit">
+                    <input
+                      type="url"
+                      value={urlInput}
+                      onChange={(e) => { setUrlInput(e.target.value); setUrlError('') }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
+                      placeholder="https://yourportfolio.com  or  https://example.com/cv.pdf"
+                      className={`w-full bg-surface border rounded-lg p-4 text-sm text-foreground placeholder:text-muted focus:outline-none transition-colors ${
+                        urlError ? 'border-red-500/50 focus:border-red-500' : 'border-border focus:border-foreground/20'
+                      }`}
+                    />
+                    <div className="h-5 mt-2">
+                      <AnimatePresence>
+                        {urlError ? (
+                          <motion.p
+                            key="err"
+                            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                            className="text-red-400 text-xs"
+                          >
+                            {urlError}
+                          </motion.p>
+                        ) : (
+                          <motion.p
+                            key="hint"
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            className="text-xs text-muted/50"
+                          >
+                            Works with portfolio sites and direct PDF links. LinkedIn is login-gated and may not work.
+                          </motion.p>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </motion.div>
+                )}
+
+              </AnimatePresence>
 
               <div className="mt-6">
                 <button
                   onClick={handleSubmit}
-                  disabled={isOverMax}
+                  disabled={isOverMax || isSubmitting}
                   className="w-full py-3.5 bg-accent hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed rounded text-white font-medium transition-colors"
                 >
-                  Check My Ego
+                  {isSubmitting ? 'Reading file...' : 'Check My Ego'}
                 </button>
                 <p className="text-xs text-muted text-center mt-4 leading-relaxed">
                   We do not store your content. Results are anonymous unless you choose to publish.

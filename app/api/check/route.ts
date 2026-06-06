@@ -6,12 +6,12 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 
 const PROMPT = `You are EgoCheck — a brutally honest resume/portfolio evaluator. Direct, sardonic, but always useful.
 
-Evaluate the text below and return ONLY a valid JSON object. No markdown, no explanation, just the JSON.
+Evaluate the content and return ONLY a valid JSON object. No markdown, no explanation, just the JSON.
 
 Required structure:
 {
   "score": <integer 0-100, must equal the sum of section scores>,
-  "roastHeadline": <one punchy line, max 12 words, reference something specific from the text>,
+  "roastHeadline": <one punchy line, max 12 words, reference something specific from the content>,
   "sections": [
     {
       "name": "Headline / Summary",
@@ -68,26 +68,116 @@ function getTier(score: number): { tier: string; tierEmoji: string } {
   return { tier: 'Start Over.', tierEmoji: '💀' }
 }
 
-export async function POST(req: NextRequest) {
-  try {
-    const { text, inputType } = (await req.json()) as { text: string; inputType: InputType }
+function extractTextFromHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 
-    if (!text || text.trim().length < 100) {
-      return Response.json({ error: 'Too short to evaluate.' }, { status: 400 })
+async function fetchUrl(url: string): Promise<{ kind: 'text'; content: string } | { kind: 'pdf'; base64: string }> {
+  const resp = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; EgoCheck/1.0 resume evaluator)' },
+    signal: AbortSignal.timeout(12000),
+  })
+
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching URL`)
+
+  const contentType = resp.headers.get('content-type') ?? ''
+
+  if (contentType.includes('application/pdf') || url.toLowerCase().split('?')[0].endsWith('.pdf')) {
+    const bytes = await resp.arrayBuffer()
+    return { kind: 'pdf', base64: Buffer.from(bytes).toString('base64') }
+  }
+
+  const html = await resp.text()
+  const text = extractTextFromHtml(html)
+
+  if (text.length < 50) throw new Error('Could not extract meaningful content from that URL.')
+  return { kind: 'text', content: text }
+}
+
+export async function POST(req: NextRequest) {
+  type Payload =
+    | { method: 'text'; text: string; inputType: InputType }
+    | { method: 'pdf'; pdfBase64: string; inputType: InputType }
+    | { method: 'url'; url: string; inputType: InputType }
+
+  let payload: Payload
+  try {
+    payload = (await req.json()) as Payload
+  } catch {
+    return Response.json({ error: 'Invalid request body.' }, { status: 400 })
+  }
+
+  const { method, inputType } = payload
+
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+    const preamble = `${PROMPT}\n\nInput type: ${inputType}\n\n`
+
+    // Build content parts based on method
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let contentParts: any[]
+
+    if (method === 'text') {
+      const { text } = payload
+      if (!text || text.trim().length < 100) {
+        return Response.json({ error: 'Too short to evaluate.' }, { status: 400 })
+      }
+      contentParts = [{ text: preamble + `Text to evaluate:\n${text.slice(0, 5000)}` }]
+
+    } else if (method === 'pdf') {
+      const { pdfBase64 } = payload
+      if (!pdfBase64) return Response.json({ error: 'No PDF data received.' }, { status: 400 })
+      contentParts = [
+        { text: preamble + 'The resume/portfolio is attached as a PDF. Evaluate its full content.' },
+        { inlineData: { mimeType: 'application/pdf', data: pdfBase64 } },
+      ]
+
+    } else if (method === 'url') {
+      const { url } = payload
+      if (!url?.match(/^https?:\/\/.+/)) {
+        return Response.json({ error: 'Invalid URL.' }, { status: 400 })
+      }
+
+      let fetched: { kind: 'text'; content: string } | { kind: 'pdf'; base64: string }
+      try {
+        fetched = await fetchUrl(url)
+      } catch (e) {
+        return Response.json({ error: (e as Error).message || 'Could not fetch that URL.' }, { status: 400 })
+      }
+
+      if (fetched.kind === 'pdf') {
+        contentParts = [
+          { text: preamble + `PDF fetched from: ${url}\nEvaluate its full content.` },
+          { inlineData: { mimeType: 'application/pdf', data: fetched.base64 } },
+        ]
+      } else {
+        contentParts = [
+          { text: preamble + `Content extracted from: ${url}\n\n${fetched.content.slice(0, 5000)}` },
+        ]
+      }
+
+    } else {
+      return Response.json({ error: 'Unknown method.' }, { status: 400 })
     }
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
-
-    const result = await model.generateContent(
-      `${PROMPT}\n\nInput type: ${inputType}\n\nText to evaluate:\n${text.slice(0, 5000)}`
-    )
-
+    const result = await model.generateContent(contentParts)
     const raw = result.response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
     const parsed = JSON.parse(raw) as Omit<EgoCheckResult, 'tier' | 'tierEmoji'>
 
-    // Clamp score to sum of sections to prevent hallucination drift
-    const sectionSum = parsed.sections.reduce((acc, s) => acc + s.score, 0)
-    const finalScore = Math.min(100, Math.max(0, sectionSum))
+    // Clamp score to actual section sum to prevent hallucination drift
+    const sectionSum  = parsed.sections.reduce((acc, s) => acc + s.score, 0)
+    const finalScore  = Math.min(100, Math.max(0, sectionSum))
 
     return Response.json({ ...parsed, score: finalScore, ...getTier(finalScore) } satisfies EgoCheckResult)
   } catch (err) {

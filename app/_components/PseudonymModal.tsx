@@ -18,20 +18,39 @@ export default function PseudonymModal({ score, tier, tierEmoji, roastHeadline, 
   const [regeneratesLeft, setRegeneratesLeft] = useState(3)
   const [publishing, setPublishing] = useState(false)
   const [published, setPublished] = useState(false)
+  const [aliasError, setAliasError] = useState('')
 
   const handleRegenerate = () => {
     if (regeneratesLeft <= 0) return
     setPseudonym(generatePseudonym())
     setRegeneratesLeft((r) => r - 1)
+    setAliasError('')
+  }
+
+  const handleAliasChange = (val: string) => {
+    setPseudonym(val)
+    if (aliasError) setAliasError('')
+  }
+
+  const validateAlias = () => {
+    const trimmed = pseudonym.trim()
+    if (trimmed.length < 3) return 'Alias must be at least 3 characters.'
+    if (trimmed.length > 30) return 'Alias must be 30 characters or fewer.'
+    if (!/^[\w\s\-_.]+$/.test(trimmed)) return 'Only letters, numbers, spaces, _ - and . allowed.'
+    return ''
   }
 
   const handlePublish = async () => {
+    const err = validateAlias()
+    if (err) { setAliasError(err); return }
+    const trimmedAlias = pseudonym.trim()
+    setPseudonym(trimmedAlias)
     setPublishing(true)
     try {
       await fetch('/api/leaderboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pseudonym, score, tier, tierEmoji, roastHeadline, inputType }),
+        body: JSON.stringify({ pseudonym: trimmedAlias, score, tier, tierEmoji, roastHeadline, inputType }),
       })
     } catch {
       // Fail silently — still show published state
@@ -96,21 +115,36 @@ export default function PseudonymModal({ score, tier, tierEmoji, roastHeadline, 
               </div>
 
               <div className="mb-6">
-                <p className="text-xs text-muted uppercase tracking-widest mb-3">Your alias</p>
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={pseudonym}
-                    initial={{ opacity: 0, x: -8 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 8 }}
-                    transition={{ duration: 0.18 }}
-                    className="bg-surface border border-border rounded p-4 flex items-center justify-between"
-                  >
-                    <span className="font-mono text-foreground font-semibold">{pseudonym}</span>
-                    <span className="text-xs text-muted ml-4">
-                      {tierEmoji} {score}/100
-                    </span>
-                  </motion.div>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs text-muted uppercase tracking-widest">Your alias</p>
+                  <span className={`text-xs font-mono transition-colors ${pseudonym.length > 30 ? 'text-red-400' : 'text-muted/50'}`}>
+                    {pseudonym.length}/30
+                  </span>
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={pseudonym}
+                    onChange={(e) => handleAliasChange(e.target.value)}
+                    maxLength={35}
+                    spellCheck={false}
+                    className={`w-full bg-surface border rounded p-4 pr-20 font-mono text-sm text-foreground focus:outline-none transition-colors ${
+                      aliasError ? 'border-red-500/50 focus:border-red-500' : 'border-border focus:border-foreground/20'
+                    }`}
+                  />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-muted pointer-events-none">
+                    {tierEmoji} {score}/100
+                  </span>
+                </div>
+                <AnimatePresence>
+                  {aliasError && (
+                    <motion.p
+                      initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                      className="text-red-400 text-xs mt-2"
+                    >
+                      {aliasError}
+                    </motion.p>
+                  )}
                 </AnimatePresence>
               </div>
 
