@@ -68,41 +68,17 @@ function getTier(score: number): { tier: string; tierEmoji: string } {
   return { tier: 'Start Over.', tierEmoji: '💀' }
 }
 
-function extractTextFromHtml(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-async function fetchUrl(url: string): Promise<{ kind: 'text'; content: string } | { kind: 'pdf'; base64: string }> {
-  const resp = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; EgoCheck/1.0 resume evaluator)' },
-    signal: AbortSignal.timeout(12000),
+// Uses Jina AI Reader (r.jina.ai) which runs headless Chrome — executes JS,
+// waits for animations to finish, and handles PDFs natively. No API key needed.
+async function fetchUrl(url: string): Promise<string> {
+  const resp = await fetch(`https://r.jina.ai/${url}`, {
+    headers: { Accept: 'text/plain', 'X-No-Cache': 'true' },
+    signal: AbortSignal.timeout(30000),
   })
-
-  if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching URL`)
-
-  const contentType = resp.headers.get('content-type') ?? ''
-
-  if (contentType.includes('application/pdf') || url.toLowerCase().split('?')[0].endsWith('.pdf')) {
-    const bytes = await resp.arrayBuffer()
-    return { kind: 'pdf', base64: Buffer.from(bytes).toString('base64') }
-  }
-
-  const html = await resp.text()
-  const text = extractTextFromHtml(html)
-
+  if (!resp.ok) throw new Error(`Could not read that URL (HTTP ${resp.status}).`)
+  const text = (await resp.text()).trim()
   if (text.length < 50) throw new Error('Could not extract meaningful content from that URL.')
-  return { kind: 'text', content: text }
+  return text
 }
 
 export async function POST(req: NextRequest) {
@@ -148,24 +124,15 @@ export async function POST(req: NextRequest) {
       if (!url?.match(/^https?:\/\/.+/)) {
         return Response.json({ error: 'Invalid URL.' }, { status: 400 })
       }
-
-      let fetched: { kind: 'text'; content: string } | { kind: 'pdf'; base64: string }
+      let extracted: string
       try {
-        fetched = await fetchUrl(url)
+        extracted = await fetchUrl(url)
       } catch (e) {
-        return Response.json({ error: (e as Error).message || 'Could not fetch that URL.' }, { status: 400 })
+        return Response.json({ error: (e as Error).message || 'Could not read that URL.' }, { status: 400 })
       }
-
-      if (fetched.kind === 'pdf') {
-        contentParts = [
-          { text: preamble + `PDF fetched from: ${url}\nEvaluate its full content.` },
-          { inlineData: { mimeType: 'application/pdf', data: fetched.base64 } },
-        ]
-      } else {
-        contentParts = [
-          { text: preamble + `Content extracted from: ${url}\n\n${fetched.content.slice(0, 5000)}` },
-        ]
-      }
+      contentParts = [
+        { text: preamble + `Content extracted from: ${url}\n\n${extracted.slice(0, 8000)}` },
+      ]
 
     } else {
       return Response.json({ error: 'Unknown method.' }, { status: 400 })
