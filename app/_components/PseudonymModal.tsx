@@ -2,24 +2,42 @@
 
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { generatePseudonym } from '../_lib/mockData'
+import { generatePseudonym, type InputType } from '../_lib/mockData'
 
 interface Props {
   score: number
   tier: string
   tierEmoji: string
+  roastHeadline: string
+  inputType: InputType
   onClose: () => void
 }
 
-export default function PseudonymModal({ score, tierEmoji, onClose }: Props) {
+export default function PseudonymModal({ score, tier, tierEmoji, roastHeadline, inputType, onClose }: Props) {
   const [pseudonym, setPseudonym] = useState(() => generatePseudonym())
   const [regeneratesLeft, setRegeneratesLeft] = useState(3)
+  const [publishing, setPublishing] = useState(false)
   const [published, setPublished] = useState(false)
 
   const handleRegenerate = () => {
     if (regeneratesLeft <= 0) return
     setPseudonym(generatePseudonym())
     setRegeneratesLeft((r) => r - 1)
+  }
+
+  const handlePublish = async () => {
+    setPublishing(true)
+    try {
+      await fetch('/api/leaderboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pseudonym, score, tier, tierEmoji, roastHeadline, inputType }),
+      })
+    } catch {
+      // Fail silently — still show published state
+    }
+    setPublishing(false)
+    setPublished(true)
   }
 
   return (
@@ -99,7 +117,7 @@ export default function PseudonymModal({ score, tierEmoji, onClose }: Props) {
               <div className="flex flex-col gap-3">
                 <button
                   onClick={handleRegenerate}
-                  disabled={regeneratesLeft === 0}
+                  disabled={regeneratesLeft === 0 || publishing}
                   className="w-full py-2.5 border border-border rounded text-sm text-muted hover:text-foreground hover:border-foreground/30 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   Give me another
@@ -108,10 +126,11 @@ export default function PseudonymModal({ score, tierEmoji, onClose }: Props) {
                   )}
                 </button>
                 <button
-                  onClick={() => setPublished(true)}
-                  className="w-full py-3 bg-accent hover:bg-accent-hover rounded text-white font-medium text-sm transition-colors"
+                  onClick={handlePublish}
+                  disabled={publishing}
+                  className="w-full py-3 bg-accent hover:bg-accent-hover disabled:opacity-60 disabled:cursor-not-allowed rounded text-white font-medium text-sm transition-colors"
                 >
-                  Publish Anonymously
+                  {publishing ? 'Publishing...' : 'Publish Anonymously'}
                 </button>
               </div>
 

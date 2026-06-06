@@ -59,19 +59,45 @@ export default function CheckFlow() {
     setShowModal(false)
   }
 
-  // Loading: cycle messages then pick result
+  // Loading: call Gemini API + enforce minimum 4s for progress bar animation
   useEffect(() => {
     if (step !== 'loading') return
     const msgInterval = setInterval(() => setLoadingMsgIdx((i) => i + 1), 750)
-    const done = setTimeout(() => {
-      clearInterval(msgInterval)
-      const picked = MOCK_RESULTS[Math.floor(Math.random() * MOCK_RESULTS.length)]
-      setResult(picked)
-      setDisplayScore(0)
-      setScoreLanded(false)
-      setStep('reveal')
-    }, 4200)
-    return () => { clearInterval(msgInterval); clearTimeout(done) }
+    const controller = new AbortController()
+
+    const minDelay = new Promise<void>((r) => setTimeout(r, 4000))
+    const apiCall = fetch('/api/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: inputText, inputType }),
+      signal: controller.signal,
+    }).then((r) => r.json())
+
+    Promise.all([minDelay, apiCall])
+      .then(([, data]) => {
+        clearInterval(msgInterval)
+        if (data?.score !== undefined) {
+          setResult(data as EgoCheckResult)
+        } else {
+          // API error — fall back to mock so the UI still works
+          setResult(MOCK_RESULTS[Math.floor(Math.random() * MOCK_RESULTS.length)])
+        }
+        setDisplayScore(0)
+        setScoreLanded(false)
+        setStep('reveal')
+      })
+      .catch((err) => {
+        if ((err as Error).name === 'AbortError') return
+        clearInterval(msgInterval)
+        setResult(MOCK_RESULTS[Math.floor(Math.random() * MOCK_RESULTS.length)])
+        setDisplayScore(0)
+        setScoreLanded(false)
+        setStep('reveal')
+      })
+
+    return () => { clearInterval(msgInterval); controller.abort() }
+  // inputText and inputType are stable once step transitions to 'loading'
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step])
 
   // Score counter via motion animate()
@@ -395,6 +421,8 @@ export default function CheckFlow() {
             score={result.score}
             tier={result.tier}
             tierEmoji={result.tierEmoji}
+            roastHeadline={result.roastHeadline}
+            inputType={inputType}
             onClose={() => setShowModal(false)}
           />
         )}

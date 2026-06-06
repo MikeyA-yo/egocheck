@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { motion, AnimatePresence } from 'motion/react'
 import { HALL_OF_FAME, WALL_OF_SHAME, type LeaderboardEntry, getTierInfo } from '../_lib/mockData'
@@ -82,6 +82,18 @@ function BoardPanel({
 
 export default function Leaderboard() {
   const [activeBoard, setActiveBoard] = useState<Board>('fame')
+  const [fameEntries, setFameEntries] = useState<LeaderboardEntry[]>(HALL_OF_FAME)
+  const [shameEntries, setShameEntries] = useState<LeaderboardEntry[]>(WALL_OF_SHAME)
+
+  useEffect(() => {
+    fetch('/api/leaderboard')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.hallOfFame?.length > 0) setFameEntries(data.hallOfFame as LeaderboardEntry[])
+        if (data.wallOfShame?.length > 0) setShameEntries(data.wallOfShame as LeaderboardEntry[])
+      })
+      .catch(() => {}) // Keep mock data on error
+  }, [])
 
   return (
     <div className="min-h-screen bg-background">
@@ -128,8 +140,8 @@ export default function Leaderboard() {
 
         {/* Desktop: side by side */}
         <div className="hidden lg:grid lg:grid-cols-2 gap-6">
-          <BoardPanel title="🏆 Hall of Fame" subtitle="The untouchables. Study these." entries={HALL_OF_FAME} />
-          <BoardPanel title="💀 Wall of Shame" subtitle="The certified delusions. Learn from them." entries={WALL_OF_SHAME} />
+          <BoardPanel title="🏆 Hall of Fame" subtitle="The untouchables. Study these." entries={fameEntries} />
+          <BoardPanel title="💀 Wall of Shame" subtitle="The certified delusions. Learn from them." entries={shameEntries} />
         </div>
 
         {/* Mobile: tabbed with AnimatePresence */}
@@ -143,7 +155,7 @@ export default function Leaderboard() {
                 exit={{ opacity: 0, x: 12 }}
                 transition={{ duration: 0.22 }}
               >
-                <BoardPanel title="🏆 Hall of Fame" subtitle="The untouchables. Study these." entries={HALL_OF_FAME} />
+                <BoardPanel title="🏆 Hall of Fame" subtitle="The untouchables. Study these." entries={fameEntries} />
               </motion.div>
             ) : (
               <motion.div
@@ -153,7 +165,7 @@ export default function Leaderboard() {
                 exit={{ opacity: 0, x: -12 }}
                 transition={{ duration: 0.22 }}
               >
-                <BoardPanel title="💀 Wall of Shame" subtitle="The certified delusions. Learn from them." entries={WALL_OF_SHAME} />
+                <BoardPanel title="💀 Wall of Shame" subtitle="The certified delusions. Learn from them." entries={shameEntries} />
               </motion.div>
             )}
           </AnimatePresence>
